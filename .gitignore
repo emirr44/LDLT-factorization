@@ -1,0 +1,15 @@
+build/
+*.o
+*.exe
+
+# local editor/agent settings, not part of the project
+.claude/
+
+# generated at first run; rebuilds itself from data/suitesparse
+data/catalog.db
+
+# text reports written by the `save` command
+reports/
+
+# data/suitesparse/ is deliberately NOT ignored: the test matrices ship with
+# the project so a fresh clone has a populated catalog with no setup step.

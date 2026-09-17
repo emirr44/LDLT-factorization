@@ -1,0 +1,9 @@
+# Normalise line endings for ordinary text files.
+* text=auto
+
+# Shell scripts must keep Unix line endings on every checkout, otherwise bash
+# on macOS/Linux fails with "$'\r': command not found".
+*.sh text eol=lf
+
+# Keep the matrices byte-for-byte as downloaded.
+*.mtx -text

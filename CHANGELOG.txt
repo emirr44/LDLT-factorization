@@ -1,0 +1,736 @@
+LDL^T Sparse Factorization - Change Log
+=======================================
+
+This file records every change made to the project, newest entry first.
+Each entry: date, phase, what changed, files touched, verification status.
+
+
+2026-09-17  Replaced the GUI with an interactive command-line tool, `ldlt`
+------------------------------------------------------------
+The project proposal specifies the deliverable as "print L and D for small
+matrices, show statistical data for sparsity in command line interface". The
+natID GUI was never part of it, and the author did not want to submit an
+application they had not built. It is removed, and the command-line tool is
+now the single front end.
+
+Removed
+  - apps/gui/ (natID application), its build output on the natID RAM disk,
+    and its entry in natID.SDK/DevEnv/DevResPaths.txt.
+  - apps/ldlt_cli.cpp, moved to apps/cli/batch.cpp (see below).
+
+Added: apps/cli/, one executable called `ldlt`
+  main.cpp         No arguments: interactive session. Otherwise: batch
+                   command. Global options --plain and --root <dir>.
+  interactive.cpp  The session. A welcome panel with "Getting started", then a
+                   prompt "ldlt (amd) >". Commands: mtx_<n> or a matrix name
+                   (factorize from the catalog), a path to a .mtx (factorize
+                   without importing), list, import <file|folder>,
+                   remove <mtx_n|name>, order [method], save [file.txt],
+                   clear, help, exit. Dropped paths are unquoted, and on
+                   macOS/Linux escaped spaces are undone.
+  report.cpp       The pipeline and its text, moved unchanged from the GUI so
+                   the output is the same; the only edit is "1 step" instead of
+                   "1 steps".
+  catalog.cpp      The matrix catalog, rewritten against SQLite's C API with
+                   prepared statements (the GUI used natID's data provider).
+  batch.cpp        The former ldlt_cli.cpp: info, print, convert, factor,
+                   orderings. Kept as-is apart from the program name and a
+                   `help` command, so --check-factor and the ordering
+                   comparison still work.
+  term.cpp         Colour and Unicode box drawing, plain ASCII when output is
+                   not a terminal, when NO_COLOR is set, or with --plain.
+                   FORCE_COLOR keeps colour when piping. On Windows it switches
+                   the console to UTF-8 and ANSI mode, and falls back to plain
+                   output on a console too old for that.
+
+The catalog (apps/cli/catalog.cpp)
+  - Same schema as before: Matrix(ID, Name, Path, N, NNZ, Field, Symm).
+  - Seeds itself from data/suitesparse on first run, in order of increasing n,
+    so the ids are mtx_1 = bcsstk01 (n=48) ... mtx_18 = aug3d (n=24300) and
+    mtx_1 is always quick. (The GUI seeded alphabetically, which made the
+    largest matrix mtx_1.)
+  - Import is an upsert (INSERT ... ON CONFLICT(Path) DO UPDATE), so
+    re-importing a file refreshes it and keeps its id.
+  - Paths stored relative to the project root; rows whose file is missing are
+    skipped on load.
+  - If the database file cannot be opened, it falls back to an in-memory
+    database: everything works, imports are not kept, and the user is told.
+
+SQLite is bundled: third_party/sqlite/sqlite3.{c,h}, version 3.53.4
+  - Downloaded from sqlite.org. The size (2946650 bytes) and the SHA3-256
+    published on the download page
+    (628a44cfe82c66aed1ccbbe85a562d2e33ebe64b3288981ed76285612227934e)
+    were both checked before extracting.
+  - Public domain. Built with SQLITE_THREADSAFE=0 and
+    SQLITE_OMIT_LOAD_EXTENSION, so it links with no extra libraries on any
+    platform.
+  - Chosen so that building needs nothing beyond a C/C++ compiler: no natID,
+    no package manager, no system SQLite.
+
+Build
+  - build.sh (new, macOS/Linux): `bash build.sh` -> build/ldlt.
+  - build.ps1 (Windows): now builds build\ldlt.exe.
+      Also fixed: Windows PowerShell treats anything a native program writes to
+      stderr as an error, so with $ErrorActionPreference = "Stop" a mere
+      compiler warning aborted the build. Compilers now run through
+      Invoke-Compiler, which judges success by exit code only.
+  - CMakeLists.txt: targets sqlite3, ldlt_core (the library, formerly `ldlt`)
+    and ldlt (the tool).
+  - All three write build/generated/ldlt_config.hpp with the project path, so
+    the tool finds data/ from any working directory. A header rather than a
+    -D define, because PowerShell 5.1 mangles quoted arguments to native
+    programs. Lookup order at run time: --root, $LDLT_ROOT, the built-in path,
+    the current directory.
+  - SQLite is compiled once and its object reused by build.ps1 and build.sh.
+
+Repository
+  - .gitattributes (new): *.sh always checked out with LF. A CRLF build.sh
+    fails on macOS with "$'\r': command not found". *.mtx kept byte-for-byte.
+  - .gitignore: reports/ added (output of `save`).
+  - README.md rewritten around the tool, with a quick start per platform and
+    the Bunch-Kaufman substitution explained next to the status table.
+
+Verification
+  - build.ps1 (GCC 16, -Wall -Wextra -Wpedantic -Wshadow -Wconversion): clean,
+    no warnings.
+  - CMake + MSVC 19.51: clean after two MSVC-only fixes (getenv flagged by the
+    secure-CRT deprecation, silenced with _CRT_SECURE_NO_WARNINGS; a redundant
+    warning-level flag on sqlite3 removed). That binary also runs correctly.
+  - build.sh under MSYS2 bash with `set -euo pipefail`, both with CC/CXX set
+    and with its defaults (cc/c++), plus --clean, on a scratch copy of the
+    project; the resulting binary seeds, lists, factorizes and saves.
+  - Scripted sessions: welcome panel, list, ordering change, name lookup in
+    any letter case, unknown input, bad ordering, save, remove, re-import
+    (keeps its id), a direct file path, the largest matrix (aug3d, n=24300:
+    168 ms numeric, refinement converged in 2 steps), running from another
+    directory, the in-memory fallback (data/catalog.db made a directory),
+    and --root pointing at a folder without data/ (exit code 1).
+  - Batch mode: help (exit 0), factor --check-factor on bcsstk01 gives factor
+    error 1.090e-16, orderings, unknown command (exit 2).
+  - Coloured output checked by capturing it with FORCE_COLOR: all 15 lines of
+    the welcome box are exactly 71 columns wide, and the status line is
+    green.
+  - Bug found and fixed during testing: text piped in by Windows tools starts
+    with a UTF-8 byte-order mark, so the first command was not recognised.
+    Input lines now drop a leading BOM.
+
+Worth knowing
+  - Forward error differs slightly between compilers (bcsstk01 with amd:
+    9.4e-14 with GCC, 1.7e-13 with MSVC). It scales with the condition number
+    and is sensitive to rounding, so this is expected; the backward error,
+    which is what a stable method guarantees, is identical (9.487e-17).
+  - Not verified on macOS. build.sh was exercised with GCC under bash, not with
+    Apple clang.
+
+
+2026-09-16  Removed tests/ and results/
+------------------------------------------------------------
+User's decision, for a course project they have to defend: the test suite and
+the measured result tables were written with AI assistance and they were not
+comfortable submitting code they could not explain. The concern was raised and
+the trade-off discussed; the call to remove is theirs.
+
+Removed
+  - tests/ (framework.hpp, helpers.hpp, main.cpp and the five test files):
+    45 test cases, 1756 checks.
+  - results/ (bcsstk_baseline_natural_ordering.txt, bcsstk_orderings.txt,
+    indefinite_static_pivoting.txt).
+  - build/ldlt_tests.exe.
+
+Updated the things that referenced them
+  - build.ps1: dropped the -Test switch and the test compile; it now builds
+    the library and the CLI only.
+  - CMakeLists.txt: removed the ldlt_tests target, enable_testing() and
+    add_test.
+  - README.md: layout, build section, and the three pointers into results/.
+    The two findings that mattered were kept inline rather than lost: the
+    static-pivot threshold result (1e-12 safe, 1e-8 degrades bcsstk13/14) and
+    how to compare orderings via "ldlt_cli orderings".
+  - apps/gui/src/Factorize.h: the same comment pointed at a results file.
+
+What correctness evidence remains
+  ldlt_cli --check-factor computes ||PAP' - LDL'||_F / ||A||_F explicitly, and
+  every factor run reports the normwise backward and forward error, so the
+  factorization can still be demonstrated to be correct on any matrix - just
+  interactively rather than as an automated suite. Re-verified after removal:
+  bcsstk01 with amd gives factor error 1.090e-16 and backward error 9.487e-17.
+
+Consequence to be aware of
+  There is no longer a regression net. Any future change to the library has to
+  be checked by hand against the CLI on a few matrices; a subtle break in the
+  symbolic analysis or in AMD would previously have been caught by
+  etree_matches_ldl_symbolic or ordering_bcsstk_fill and now will not be.
+
+Verification
+  - .\build.ps1: clean.
+  - Root CMake reconfigures without the removed target.
+  - apps/gui Release: clean, no warnings.
+  - No dangling references to tests/ or results/ remain outside this file.
+
+
+2026-09-16  Made the catalog self-sufficient and portable
+------------------------------------------------------------
+Motivated by the app having to run on a reviewer's macOS machine, where it
+cannot be tested beforehand. The goal was to remove every way the app could
+come up unusable, rather than to assume it will not.
+
+The matrices now ship with the project
+  - data/suitesparse/ is no longer in .gitignore. The 18 test matrices are
+    committed (6.9 MB, largest 2.0 MB, so nowhere near any GitHub limit).
+    They were only ignored because fetch_matrices.ps1 downloads them, which
+    mistook input data for build output: the whole point of the catalog is to
+    have matrices in it.
+  - data/catalog.db IS ignored - it is generated, and regenerates itself.
+
+Catalog no longer a hard dependency  (apps/gui/src/Catalog.{h,cpp})
+  - Catalog::open() cannot fail any more. If SQLite is unavailable for any
+    reason it falls back to scanning data/suitesparse directly and reports
+    why; Import and Remove are then refused with an explanation, and nothing
+    else is affected. Previously a database failure left an empty dropdown and
+    a disabled Factorize button, i.e. an app with nothing to show.
+  - An empty catalog seeds itself from data/suitesparse on first run. Manual
+    import still works; this only removes the empty-on-first-launch state.
+  - Paths are stored RELATIVE to the project root, absolute only for files
+    outside it. A catalog is therefore still valid after the project moves or
+    is opened on another machine.
+  - reload() skips rows whose file does not exist. That both avoids offering a
+    matrix that would fail on Factorize, and self-heals a catalog carried over
+    from a machine with different paths.
+  - The report screen shows any catalog warning plus how many matrices are
+    available, instead of starting blank.
+
+Portability fix
+  - MainView.h used std::exception without including <exception>. MSVC
+    provides it transitively and clang generally does not, so this would have
+    failed to compile on macOS.
+
+Audited for portability (no findings): no windows.h, _MSC_VER, __declspec,
+%I64 format specifiers or backslash paths anywhere in apps/gui or the library.
+The monospace font list already had Menlo second, before the
+getSystemMonospacedFamilyNames() fallback.
+
+Verification
+  - Release and Debug both build clean, no warnings.
+  - Deleted data/catalog.db, launched the app, and confirmed it rebuilt the
+    catalog with all 18 matrices, storing relative paths
+    ("data/suitesparse/bcsstk01.mtx") with no absolute path in the file.
+
+Still unverified: everything on macOS. No Mac available here.
+
+
+2026-09-16  Fixed the Save report crash; hardened all GUI callbacks
+------------------------------------------------------------
+Save report aborted the process in the Debug build ("abort() has been
+called", Microsoft Visual C++ Runtime Library).  Factorization and the
+report screen were fine; only saving crashed.
+
+Cause
+  The dialog was opened with the bare extension string "*.txt" passed as
+  SaveFileDialog's defaultExtension parameter.  Replacing it with the
+  explicit pattern-list overload fixed it.  Note the diagnosis is partly
+  inference: after the change the save completes with no error alert, and
+  the new catch-all (below) would have reported anything it caught, so the
+  extension argument is what was faulty rather than something downstream.
+  The dialog message had no assertion file/line, which is the signature of
+  std::terminate from an uncaught exception rather than a failed assert -
+  natID's own examples pass "*.html" to the same parameter, so the wildcard
+  form is at best fragile here.
+
+  Ruled out along the way, each tested in a Debug console harness rather
+  than guessed at:
+    - syst::Shell::openUrl() with a filesystem path: works, returns 1 and
+      opens the file (it is documented for URLs, so this was the first
+      suspect).
+    - SaveFileDialog::show() itself with the exact same arguments: opens
+      and returns normally, so the call was not malformed.
+    - td::String::c_str() returning nullptr for an empty string, which
+      would have made std::string(nullptr) undefined: it is never null.
+
+Changed  apps/gui/src/MainView.h
+  - askSaveReport(): now uses the pattern-list overload,
+    {{"Text files", "*.txt"}}, with the suggested name as the dialog's
+    default file name.
+  - Added MainView::guarded(), and routed every button handler, every file
+    dialog callback and the worker-completion callback through it.  These
+    run from GTK's C code, which cannot unwind, so an escaping exception
+    reaches std::terminate and kills the process instead of surfacing.
+    Errors now appear in an alert.
+  - writeReport(): checks the stream after writing, and a failure to open
+    the saved file is reported without discarding the save.
+
+Verification
+  - Release and Debug both build clean.
+  - Confirmed by the user in the Debug build: bcsstk01 with amd saves the
+    full report - summary, all 445 entries of L in column order, 48
+    diagonal entries of D, and the 48-entry permutation - and opens it.
+
+Still open (cosmetic)
+  - D is written with setprecision(17) in default float format, so the
+    number of digits varies per line (502500000 next to
+    2411712.9629600001).  Scientific format would line up.
+  - Button sizing, and the green on Factorize.
+
+
+2026-09-16  natID GUI front end (apps/gui)
+------------------------------------------------------------
+A small GUI on top of the existing library, built with the natID framework
+(C++ native UI, GTK4 on Windows).  Matrix dropdown and ordering dropdown on
+top, a plain black report screen in the middle, Factorize / Save report at
+the bottom.  The library itself is untouched.
+
+Added
+  - apps/gui/CMakeLists.txt, apps/gui/ldltGui.cmake: separate CMake solution
+    (ldltGuiSol, target ldltGui).  It must stay separate from the root
+    CMakeLists: natID's DevEnv/Common.cmake forces C++20, its own binary
+    directory and its own output paths onto every target in the solution,
+    which would break the g++ build of the library, the CLI and the tests.
+    src/*.cpp is compiled straight into the app, so the ldlt target is not
+    a prerequisite.
+  - apps/gui/src/{main.cpp,Application.h,MainWindow.h,MenuBar.h}: the standard
+    natID app skeleton.
+  - apps/gui/src/MainView.h: the layout, the two dropdowns, the buttons, and
+    the worker thread.  The factorization runs on a std::thread and posts the
+    result back with gui::thread::asyncExecInMainThread, so a large matrix
+    does not freeze the window.
+  - apps/gui/src/OutputView.h: the black screen.  A gui::Canvas that paints
+    its own background and draws one monospaced line per report line.  Done
+    this way because natID has no app-wide dark mode and gui::View cannot set
+    its own background colour (that API is commented out in the SDK); only
+    gui::Frame can.  The status line is coloured green/red, warnings amber.
+  - apps/gui/src/Catalog.{h,cpp}: SQLite catalog of importable matrices
+    (ID, Name, Path, N, NNZ, Field, Symm) via natID's dp layer.  Import reads
+    the whole .mtx to validate it and to record n and nnz, so a file that
+    cannot be factorized never enters the catalog; non-square input is
+    rejected.  Import folder takes every *.mtx in a directory.
+  - apps/gui/src/Factorize.{h,cpp}: the pipeline and the report text.  No GUI
+    types and no exceptions escape, so it is safe to call from the worker.
+    Mirrors ldlt_cli's verbose output.  Static pivoting 1e-12 and up to 10
+    refinement steps are always on, per results/indefinite_static_pivoting.txt.
+  - apps/gui/res/: DevRes.xml, main.xml, tr/EN/main.xml.
+
+Output policy
+  The black screen always shows the summary (n, nnz(A), nnz(L), fill, flops,
+  per-phase timings, inertia, static-pivot statistics, backward/forward
+  error).  The complete L and D, plus the permutation, go to a text file via
+  Save report, which then opens it.  No size threshold and no truncation on
+  screen: a 12k-row matrix cannot flood the view, and the full factors are
+  always available (the bcsstk11 report is ~1.3 MB).
+
+Two natID SDK defects worked around
+  - dp::createEmptySQLiteDatabase() returns nullptr and writes nothing in
+    this SDK build, and IDatabase::connect() rejects a path that does not
+    exist ("File: '...' does not exist!").  So a fresh catalog could not be
+    created by any documented route.  Catalog::open() now creates a
+    zero-length file first, which SQLite accepts as a valid empty database;
+    the CREATE TABLE then populates it.  Verified: the file grows from 0 to
+    16 KB and survives reopening.
+  - natPlot.dll is absent from natID.SDK/bin although natPlot.lib is present
+    and imports from it, so gui::plot::View would link and then fail to
+    start.  No charts are used; the report screen is a plain canvas.
+
+Catalog location
+  data/catalog.db, next to the matrices.  The path comes from the
+  LDLT_PROJECT_ROOT compile definition set in ldltGui.cmake, not from
+  mu::getAppSettings()->getResPath() - that resolves to a "Res" folder beside
+  the project root, where the database could not be created.  The folder
+  import dialog defaults to data/suitesparse.
+
+Verification
+  - Configure and build clean with MSVC 19.51 (VS 2026 Community), Release:
+    zero errors, zero warnings.
+  - Catalog and Factorize were driven headlessly (a temporary console target
+    linking Catalog.cpp, Factorize.cpp and the library, since the GUI cannot
+    be clicked from a script; removed afterwards).  All 18 matrices in
+    data/suitesparse imported; catalog.db verified to hold every row after
+    reopening.  bcsstk01 and bcsstk11 factorized with amd: status ok, 48 and
+    1473 positive pivots, 0 perturbed, backward error 9.5e-17 and 1.4e-16.
+  - The app starts, loads its translations, and creates the catalog.
+  - NOT yet exercised interactively: the dropdowns, the Factorize and Save
+    report buttons, the import dialogs, and whether the black canvas expands
+    to fill the middle of the window.
+
+Known cosmetic item
+  Button size and the green on Factorize are still being tuned.  Factorize
+  uses Button::Type::Constructive plus setBackgroundColor(Green); note that
+  natID maps Constructive to GTK's "suggested-action" class, which Adwaita
+  renders blue, so the explicit background colour is what makes it green.
+
+
+2026-09-09  Removed the ldlt namespace (user preference)
+------------------------------------------------------------
+Everything the library declares now lives at global scope.
+
+Changed (27 files)
+  - Dropped "namespace ldlt { ... }" from the 10 public headers and the
+    9 library sources.
+  - Dropped the "using namespace ldlt;" line from the 5 test files and the
+    command line tool; they were the only consumers and never wrote the
+    prefix anyway.
+  - Removed all "ldlt::" qualifications, including the example in README.md.
+  - tests/helpers.hpp: deleted three now-invalid "using ldlt::Index;" lines
+    (the rewrite left them as bare "using Index;", which does not compile).
+
+Kept deliberately
+  - The anonymous "namespace { ... }" blocks inside the .cpp files.  These
+    are not a naming convention, they give the file-local helpers internal
+    linkage.  Several sources each define their own sz(); without the
+    anonymous namespaces those would collide at link time.
+  - "namespace test" in the test helpers, which is unrelated and small.
+
+Consequence to be aware of
+  The library now exports Index, Real, Error, InvalidMatrix, IoError,
+  CooMatrix, CscMatrix, Symbolic, Numeric, Graph, Ordering, to_string and
+  friends at global scope.  If this is ever compiled alongside another
+  library that declares any of those names, the result is a conflicting
+  declaration that cannot be resolved from the calling code; one of the two
+  libraries would have to be edited.  Re-wrapping the files in a namespace
+  later is mechanical, so the decision is reversible.
+
+Verification
+  - .\build.ps1 -Test: zero warnings; 45 test cases, 1756 checks, 0 failures
+    (identical to before the change).
+  - CLI re-checked: factor on the small indefinite matrix still gives
+    D = 1, 1, -13 with factor error 0; AMD table on bcsstk08 and bcsstk13
+    unchanged.
+
+
+2026-09-08  Phase 4: static pivoting + iterative refinement (indefinite path)
+-----------------------------------------------------------------------------
+Scope: make the existing up-looking kernel usable on symmetric indefinite
+matrices without changing the algorithm: pivots that are (nearly) zero are
+perturbed instead of aborting, and iterative refinement with the original
+matrix repairs the perturbation.  Chosen over Bunch-Kaufman (which needs a
+left-looking kernel and dynamic fill) to keep the project size in check.
+
+Added
+  NumericOptions::static_pivot_relative (default 0 = off)
+      threshold = r * ||A||_inf; a pivot with |d| < threshold is replaced by
+      +-threshold (sign kept, + for exact 0).  Numeric reports
+      num_perturbed_pivots(), max_perturbation(), pivot_threshold().
+  include/ldlt/refine.hpp, src/refine.cpp
+      refine(A, num, b, x): x += A\r with r = b - A x, stopping at a target
+      backward error (4 eps), on stagnation (< 2x improvement) or when a step
+      makes things worse (the step is undone).  solve_refined() variants,
+      check_solve_refined() giving before/after residuals and the iteration
+      history.  Requires the full symmetric matrix (residual uses A x).
+  apps/ldlt_cli.cpp: factor --static-pivot <r> --refine <k>; detailed report
+      shows threshold, perturbed pivots, backward error before/after
+      refinement; table gains pert / bwd0 / it columns.
+  scripts/fetch_matrices.ps1: group/name syntax and -Indefinite set
+      (GHS_indef: laser, qpband, aug3d, tuma2, sit100, stokes64).
+  results/indefinite_static_pivoting.txt: threshold sweep and interpretation.
+  tests/test_refine.cpp (6 cases): the [1e-20 1; 1 1] example goes from
+      backward error 0.5 to <= 1e-15; saddle-point matrices with the zero
+      block first (exact zero pivot at k = 0 without static pivoting) factor
+      and refine to <= 1e-14 with natural and AMD orderings; static pivoting is
+      a no-op on SPD matrices and refinement takes <= 1 step; API variants
+      agree; error paths; laser and qpband from disk.
+
+Results (details in results/indefinite_static_pivoting.txt)
+  - Without static pivoting 5 of 6 GHS_indef matrices fail (zero pivot).
+    With --static-pivot 1e-12 --refine 10 all six solve with backward error
+    <= 2.5e-16 in <= 6 refinement steps, and the three SPD controls are
+    untouched (0 perturbed pivots).
+  - The textbook threshold 1e-8 (sqrt eps) is harmful on badly scaled SPD
+    matrices: bcsstk13/14 (||A|| ~ 1e12/1e10) get 40 legitimate pivots
+    perturbed and refinement stalls at 1e-10.  1e-14 is too small (growth in
+    L; sit100 stalls, tuma2 diverges).  1e-10..1e-12 works for all 18
+    matrices tried; 1e-12 is the documented recommendation.
+  - Several GHS_indef matrices are singular or nearly so (aug3d, laser,
+    stokes64): backward error at machine precision, forward error O(1).  The
+    solver certifies only the residual; documented.
+
+Verification
+  - .\build.ps1 -Test: zero warnings; 45 test cases, 1756 checks, 0 failures.
+  - CLI: factor over 6 indefinite files without (exit 1, 5 failures reported
+    per row) and with static pivoting + refinement (exit 0); threshold sweep
+    1e-8/1e-10/1e-12/1e-14 over 9 files; bcsstk set with static pivoting to
+    confirm no-op; detailed laser report.
+  - Fixed a table-column overflow (neg/pert ran together for aug3d).
+
+Size at the end of phase 4 (lines, blank and comment lines included)
+  include/ldlt   595     src   1890     apps   374     tests  1247
+  build/scripts  112     total 4218
+
+
+2026-09-08  Phase 3: elimination tree, postorder, column counts, orderings
+--------------------------------------------------------------------------
+Scope: replace the O(nnz(L)) symbolic analysis with the near-linear CSparse
+algorithms, add the etree postorder, and implement fill-reducing orderings
+(RCM, exact minimum degree, approximate minimum degree), measured by fill on
+the bcsstk set.
+
+Added
+  include/ldlt/etree.hpp, src/etree.cpp   (ports of cs_etree, cs_post,
+  cs_counts, cs_symperm; Davis ch. 4)
+      elimination_tree(A)            path-compressed etree, O(nnz(A) alpha)
+      postorder(parent)              iterative DFS, children before parents
+      column_counts(A, parent, post) Gilbert/Ng/Peyton skeleton algorithm,
+                                     returns counts below the diagonal
+      permute_symmetric_upper(A,pinv) upper triangle of P A P'
+      invert_perm, compose_perm
+  Symbolic::analyze_fast(A, perm)
+      etree + postorder + column counts; identical output to analyze() (the
+      ldl_symbolic port), verified on random, grid and bcsstk matrices with
+      and without permutations.  Both variants now expose post() and
+      postordered_perm() (P composed with the etree postorder: same fill,
+      postordered tree).
+  include/ldlt/ordering.hpp, src/ordering.cpp
+      Graph::from_matrix       symmetrized pattern, no diagonal, sorted adjacency
+      natural_ordering
+      rcm_ordering             reverse Cuthill-McKee with George-Liu
+                               pseudo-peripheral start per component
+      minimum_degree_ordering  exact minimum degree on an explicit elimination
+                               graph (sorted adjacency vectors, lazy heap);
+                               the reference implementation
+      amd_ordering             approximate minimum degree on a quotient graph:
+                               elements, element absorption, approximate
+                               external degree via the w(e) counting trick,
+                               supervariable detection by hashing, degree
+                               buckets.  Readable re-implementation of
+                               Amestoy/Davis/Duff; no dense-row detection or
+                               aggressive absorption.
+      compute_ordering / parse_ordering / to_string, fill_for_ordering
+  apps/ldlt_cli.cpp
+      factor --order natural|rcm|md|amd, --postorder; table shows ordering
+      time.  New command: orderings <files> - nnz(L), flops and time for
+      every method per matrix, plus amd/natural ratio.
+  results/bcsstk_orderings.txt   the comparison table with commentary
+  tests/helpers.hpp              shared generators (random_spd, grid_laplacian,
+                                 block_diagonal)
+  tests/test_etree.cpp (6 cases)  arrow/tridiagonal/forest examples, postorder
+      validity, analyze_fast == analyze on random/grid/bcsstk with random
+      permutations, symperm against a dense check, postordered_perm keeps fill
+      and yields an identity postorder, compose_perm.
+  tests/test_ordering.cpp (7 cases)  names, graph construction, empty/single/
+      diagonal/disconnected inputs, orderings independent of which triangle
+      is stored, RCM restores bandwidth 1 on a scrambled path graph, fill
+      reductions on a 20x20 grid Laplacian, random SPD matrices and bcsstk
+      files, AMD within 33 % of exact MD, every ordering factorizes and solves
+      correctly.
+
+Changed / fixed
+  - Symbolic::analyze* now REJECTS a matrix that stores only its lower
+    triangle (InvalidMatrix).  Previously it "factorized" the diagonal and
+    returned success - the unexpanded Matrix Market trap, until now only
+    documented.  A truly diagonal matrix is still accepted.
+  - Numeric::factorize/refactorize now REJECT upper-only storage when a
+    permutation is present.  Found by the new tests: ldl_symbolic/ldl_numeric
+    read the upper triangle of P A P', so entries of A that become lower after
+    permuting are lost unless both triangles are stored.  analyze_fast does
+    not have this limitation (it permutes the pattern itself); the numeric
+    kernel, being a faithful port, does, so it fails loudly instead.
+  - Tests moved random_spd into tests/helpers.hpp.
+  - build.ps1 / CMakeLists.txt: new sources and test files.
+
+Results (see results/bcsstk_orderings.txt for the full table)
+  nnz(L):        natural      rcm       md      amd   amd/natural
+  bcsstk08        233086   198890    31287    28083     0.12
+  bcsstk11         75797    65036    53051    50076     0.66
+  bcsstk13        432211   467610   289275   266185     0.62
+  bcsstk14        188985   177645   114265   106528     0.56
+  bcsstk10         19685    19790    22176    22290     1.13  (banded; natural
+                                                              is near-optimal)
+  AMD reduces fill on 10/12, ties on 2 dense/no-fill cases, loses on 1.  AMD
+  matches or beats exact MD on 10/12 and is 3-18x faster to compute.  With
+  AMD all twelve factor with backward error <= 9.6e-16 and factor error
+  <= 2.5e-15.  Symbolic phase is now <= 1.7 ms on every matrix.
+
+Verification
+  - .\build.ps1 -Test: zero warnings; 39 test cases, 1693 checks, 0 failures.
+  - CLI: orderings over 12 files (exit 0); factor --order amd --check-factor
+    over 12 files (exit 0); --order amd --postorder detailed run on bcsstk08;
+    md and rcm tables on bcsstk13/14; unknown ordering -> exit 2 with message;
+    missing file in orderings reported per row, exit 1; no args -> usage.
+
+
+2026-09-08  Phase 2: baseline LDL' factorization (port of ldl.c) + residual check
+----------------------------------------------------------------------------
+Scope: port ldl_symbolic / ldl_numeric / the five solve routines from Tim
+Davis's LDL package into owning C++ classes, add residual-based validation,
+and confirm correctness on the Harwell-Boeing bcsstk SPD matrices.  No
+fill-reducing ordering yet (natural ordering only; the permutation path is
+implemented and tested but no ordering algorithm supplies P).
+
+Added
+  include/ldlt/symbolic.hpp, src/symbolic.cpp
+      Symbolic::analyze(A, perm): elimination tree (parent), column counts,
+      column pointers of L, P and Pinv.  Validates that perm is a permutation
+      (is_valid_perm).  flops() = sum Lnz[k]*(Lnz[k]+2); fill_ratio(A).
+      Faithful port of ldl_symbolic; O(nnz(L)) as in the original.
+  include/ldlt/numeric.hpp, src/numeric.cpp
+      Numeric::factorize(A, Symbolic, NumericOptions) -> L (CSC, unit diagonal
+      not stored), D.  Up-looking row algorithm, faithful port of ldl_numeric.
+      - status()/ok()/failed_pivot(): zero pivot reported, never thrown
+      - NumericOptions::zero_pivot_tolerance: |d| <= tol counts as zero
+        (ldl.c only tests d == 0.0; default kept at 0.0 for baseline parity)
+      - refactorize(A): reuse structure and storage for new values
+      - solve()/solve_inplace(): x = P'(L'\(D\(L\(P b)))), plus the building
+        blocks lsolve/dsolve/ltsolve/permute/permute_back
+      - inertia: num_positive_pivots/num_negative_pivots, min/max |d|
+      - fixed the ldl.c inconsistency where ltsolve used plain int counters
+  include/ldlt/validate.hpp, src/validate.cpp
+      compute_residual(): ||b-Ax||, ||b||, ||x||, ||A||_inf, with
+      backward_error() = ||r|| / (||A|| ||x|| + ||b||)  (the number to report;
+      O(eps) for a stable solver regardless of conditioning) and relative().
+      reconstruction_error(): ||PAP' - LDL'||_F / ||A||_F formed explicitly
+      (dense n x n accumulator, n <= 3000).  Works whether A is stored full or
+      upper-only, by mirroring the upper triangle.
+      check_solve(): x_true (ones or seeded pseudo-random), b = A x_true,
+      solve, report backward and forward error.
+  apps/ldlt_cli.cpp: new command
+      factor <file.mtx>... [--print] [--check-factor] [--ones] [--tol t]
+      One file: detailed report (n, nnz(A), nnz(L), fill, flops, timings,
+      inertia, backward/forward/factor error) and L, D printed when n <= 12
+      or --print.  Several files: one table row per matrix.  Exit 1 if any
+      factorization fails.
+  scripts/fetch_matrices.ps1
+      Downloads HB matrices from the SuiteSparse collection into
+      data/suitesparse/ (git-ignored).  Default set: bcsstk01-06, 08-11, 13, 14.
+  results/bcsstk_baseline_natural_ordering.txt
+      The table below, kept for comparison once orderings exist.
+  tests/framework.hpp, tests/main.cpp
+      Tests split into files with a shared self-registering TEST_CASE macro.
+      tests/test_main.cpp -> tests/test_storage.cpp (content unchanged).
+  tests/test_factor.cpp (11 test cases)
+      L and D match a dense reference LDL' to 1e-14; solve residual; saddle
+      point matrix gives D = [1, 1, -13] and inertia (2, 1); zero pivot at
+      k = 0 and at k = 1; tolerance option; reverse and random permutations
+      (P A P' = L D L' checked explicitly, Pinv checked); only the upper
+      triangle is read (lower-only input yields a diagonal factorization -
+      the Matrix Market trap, now a regression test); duplicate entries are
+      summed inside the numeric phase; refactorize on scaled values; five
+      random SPD matrices n = 70..150; etree parent[j] == first row of L(:,j)
+      for every factorization; empty matrix; bcsstk01-05 from disk.
+
+Changed
+  build.ps1 / CMakeLists.txt: compile tests/*.cpp and the three new sources.
+  .gitignore: data/suitesparse/
+  README.md: status table and CLI usage.
+
+Results: bcsstk series, natural ordering, exact zero-pivot test
+  matrix        n  nnz(A)  nnz(L)   fill     flops  num[ms]  bwd err  fact err
+  bcsstk01     48     400     829   3.92  2.01e+04     0.0   1.1e-16   1.9e-16
+  bcsstk02     66    4356    2145   1.00  9.80e+04     0.1   2.4e-16   2.3e-16
+  bcsstk03    112     640     272   1.02  1.25e+03     0.0   4.3e-17   9.5e-18
+  bcsstk04    132    3648    3631   1.99  1.19e+05     0.1   1.4e-16   2.1e-16
+  bcsstk05    153    2423    2439   2.01  4.65e+04     0.1   7.0e-17   1.4e-16
+  bcsstk06    420    7860   13862   3.45  5.36e+05     0.3   4.4e-16   3.0e-16
+  bcsstk08   1074   12960  233086  33.37  5.97e+07    21.2   4.0e-16   5.4e-16
+  bcsstk09   1083   18437   62619   6.53  3.86e+06     1.7   4.1e-16   2.7e-16
+  bcsstk10   1086   22070   19685   1.79  4.16e+05     0.4   1.8e-16   1.3e-16
+  bcsstk11   1473   34241   75797   4.33  4.73e+06     2.1   2.7e-16   2.4e-16
+  bcsstk13   2003   83883  432211  10.11  1.05e+08    51.7   2.2e-16   6.0e-16
+  bcsstk14   1806   63454  188985   5.85  2.32e+07     8.7   4.5e-16   4.1e-16
+  All twelve: status ok, zero negative pivots (confirms SPD), backward error
+  at machine precision, explicit ||PAP'-LDL'||_F/||A||_F below 1e-15.
+  Forward errors range 3e-14 .. 5e-10 and track the condition numbers.
+  Fill without ordering is severe on bcsstk08 (33x) and bcsstk13 (10x):
+  this is the baseline the ordering phase has to beat.
+
+Observed limitation (motivates the pivoting phase)
+  A = [1e-20 1; 1 1] passes the exact zero-pivot test, "succeeds" with
+  D = [1e-20, -1e20] and L(1,0) = 1e20, and returns a solution with backward
+  error 0.5 - i.e. garbage.  With --tol 1e-15 it is correctly rejected at
+  k = 0.  No pivoting means no stability guarantee for indefinite matrices;
+  the decision between static pivoting + refinement and Bunch-Kaufman on a
+  left-looking kernel is still open.
+
+Verification
+  - .\build.ps1 -Test: zero warnings under -Wall -Wextra -Wpedantic -Wshadow
+    -Wconversion; 26 test cases, 912 checks, 0 failures.
+  - CLI factor exercised: table over 12 bcsstk files (exit 0), detailed runs
+    on small_spd (L, D printed, factor error 0) and small_indef (D = 1 1 -13,
+    inertia 2/1), singular matrix reports FAILED at k = 1 with exit 1,
+    --tol path, unknown option -> usage and exit 2, missing file in table
+    mode is reported per row and the run continues with exit 1.
+
+
+2026-09-08  Phase 1: sparse matrix representation (storage layer)
+------------------------------------------------------------------
+Scope: proposal step "Sparse matrix representation" plus the I/O the later
+phases need (COO -> CSC conversion, Matrix Market I/O).  No factorization
+code yet.
+
+Added
+  include/ldlt/types.hpp
+      Index = int64_t (so nnz(L) cannot overflow), Real = double.
+      Exception hierarchy: Error -> InvalidMatrix, IoError.
+  include/ldlt/coo.hpp, src/coo.cpp
+      CooMatrix: triplet assembly format.  add(), add_symmetric(), validate().
+  include/ldlt/csc.hpp, src/csc.cpp
+      CscMatrix: compressed sparse column storage with enforced invariants
+      (colptr size/monotone, row indices in range, array sizes match).
+      - from_coo(): counting sort, then sort_columns() which orders rows and
+        sums duplicates.  Result always has sorted, duplicate-free columns.
+      - from_dense(), identity()
+      - is_valid()/validate(), has_sorted_columns(), has_duplicates()
+      - transpose() (cs_transpose style, output sorted)
+      - is_structurally_symmetric(), is_symmetric(tol)
+      - upper_triangle()/lower_triangle() with/without diagonal
+      - symmetrize_from_triangle(): T + T' - diag(T); rejects mixed triangles
+      - to_upper_for_factorization(): the part LDL' actually reads
+      - multiply(), multiply_transpose(), norm_1/inf/frobenius, diagonal(), get()
+      - stats(): nnz split (diag/lower/upper), per-column min/max/avg,
+        bandwidth, density, symmetry flags, norms
+      - print()/to_string(): dense grid for small matrices, triplets otherwise
+  include/ldlt/matrix_market.hpp, src/matrix_market.cpp
+      Reader: coordinate {real|integer|pattern} {general|symmetric|
+      skew-symmetric}.  Rejects array/complex/hermitian with a line-numbered
+      IoError.  Tolerates blank lines, CRLF, case-insensitive header, comments
+      (kept in MatrixMarketInfo).  Symmetric files are expanded to the full
+      matrix by default because MM stores the LOWER triangle and LDL' reads the
+      UPPER one - reading without expansion would factor a diagonal matrix.
+      Writer: general or symmetric (lower-only) storage, 17 significant digits
+      so the round trip is bit-exact.
+  apps/ldlt_cli.cpp
+      Commands: info (statistics), print (dense/triplet view), convert
+      (general <-> symmetric storage).
+  tests/test_main.cpp
+      Self-contained unit tests (no framework): COO->CSC ordering and duplicate
+      summing, invariant violations throw, transpose, symmetry detection with
+      tolerance, triangle extraction/symmetrize, mat-vec vs dense reference,
+      norms, stats, print, Matrix Market round trip, symmetric expansion,
+      pattern/integer/skew handling, 13 malformed-file cases, sample files.
+  data/small_spd.mtx     5x5 SPD matrix, symmetric (lower) storage
+  data/small_indef.mtx   3x3 symmetric indefinite saddle-point matrix, general
+  build.ps1              g++ build (no CMake/make on this machine); -Test runs tests
+  CMakeLists.txt         equivalent CMake build for other machines
+  README.md, .gitignore
+
+Design decisions
+  - Two result types are planned for later phases (Symbolic, Numeric) so the
+    numeric phase can be re-run on a matrix with the same structure.  CscMatrix
+    therefore exposes a mutable values() but immutable structure.
+  - Factorization phases will call to_upper_for_factorization() and never read
+    the lower triangle, matching the original ldl.c convention.
+  - Pivoting strategy for indefinite matrices (static pivoting vs. Bunch-Kaufman
+    on a left-looking kernel) is still an open decision; nothing in this phase
+    depends on it.
+
+Fixed during phase 1 verification
+  - Matrix Market reader rejected files that start with a UTF-8 byte order
+    mark.  Notepad and PowerShell's Set-Content -Encoding utf8 both write one
+    by default on Windows, so a hand-saved .mtx file failed with the
+    misleading message "missing %%MatrixMarket banner (line 1)".  The reader
+    now strips a leading BOM before parsing the header (strip_bom() in
+    src/matrix_market.cpp).  Regression test added.
+  - Renamed MatrixMarketInfo::Field::Real to ::Double.  The old name shadowed
+    the library-wide Real typedef and tripped -Wshadow.  The value still maps
+    to the "real" keyword in the file format.
+
+Verification
+  - .\build.ps1 -Test : builds with -Wall -Wextra -Wpedantic -Wshadow
+    -Wconversion, zero warnings; 15 test groups, 128 checks, 0 failures.
+  - CLI executed end to end:
+      info    on data\small_spd.mtx    -> correct stats, exit 0
+              (5x5, 15 stored entries, symmetric file expanded from 10)
+      print   on data\small_indef.mtx  -> correct dense grid, exit 0
+      print   with dense_limit 3       -> falls back to triplet listing, exit 0
+      convert to symmetric storage     -> 4 lower-triangle entries written,
+              reading it back gives the full 6-entry symmetric matrix
+      convert to general storage       -> 15 entries written, exit 0
+  - CLI error handling exercised: no arguments and unknown command print
+    usage and exit 2; missing file, malformed header and out-of-range index
+    give line-numbered messages and exit 1; --symmetric on an unsymmetric
+    matrix is refused; info prints a warning when the matrix is not symmetric.
