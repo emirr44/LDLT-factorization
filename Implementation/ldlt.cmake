@@ -23,7 +23,6 @@ endif()
 source_group("core" FILES ${LDLT_CORE_SOURCES} ${LDLT_CORE_HEADERS})
 
 # -- the ldlt command line tool (src/cli) --
-# Record where the project lives, so the tool finds data/ from any directory.
 set(LDLT_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(WRITE ${LDLT_GENERATED_DIR}/ldlt_config.hpp
   "#pragma once\n#define LDLT_PROJECT_ROOT \"${CMAKE_CURRENT_LIST_DIR}\"\n")
@@ -36,7 +35,6 @@ target_include_directories(${LDLT_NAME} PRIVATE ${LDLT_GENERATED_DIR})
 target_link_libraries(${LDLT_NAME} PRIVATE ldlt_core sqlite3)
 if(MSVC)
   target_compile_options(${LDLT_NAME} PRIVATE /W4)
-  # getenv() is standard C++; MSVC's "secure CRT" deprecation is not relevant
   target_compile_definitions(${LDLT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
 else()
   target_compile_options(${LDLT_NAME} PRIVATE -Wall -Wextra)
