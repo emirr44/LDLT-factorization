@@ -14,7 +14,7 @@ After navigating to project directory in your Terminal (cd path_to_project_src),
 **macOS / Linux**
 
 ```bash
-bash build.sh
+bash build.sh (or powershell -ExecutionPolicy Bypass -File .\build.ps1)
 ./build/ldlt
 ```
 
