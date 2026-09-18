@@ -9,7 +9,7 @@ test matrices.
 
 ## Quick start
 
-After navigating to project directory in your Terminal (cd path_to_project_src), enter following commands to start CLI tool
+Download or clone repository, navigate to the Implementation file in Terminal with Admin privileges (cd path_to_project_src), and enter following commands to start CLI tool
 
 **macOS / Linux**
 
