@@ -1,12 +1,5 @@
 #!/usr/bin/env bash
-# build.sh - build the ldlt command line tool (macOS, Linux).
-#
-#   ./build.sh            release build   ->  build/ldlt
-#   ./build.sh --clean    rebuild everything, including SQLite
-#
-# Needs a C and a C++17 compiler. On macOS that is Xcode's command line tools:
-#   xcode-select --install
-# Windows: use .\build.ps1 instead.
+# build.sh - build the ldlt command line tool (macOS, Linux)
 
 set -euo pipefail
 
@@ -22,10 +15,8 @@ mkdir -p "$GEN"
 CC="${CC:-cc}"
 CXX="${CXX:-c++}"
 
-# Record where the project lives, so ldlt finds data/ from any directory.
 printf '#pragma once\n#define LDLT_PROJECT_ROOT "%s"\n' "$ROOT" > "$GEN/ldlt_config.hpp"
 
-# SQLite is plain C and large: compile it once and reuse the object file.
 if [ ! -f "$OUT/sqlite3.o" ]; then
     echo "compiling sqlite (one time, about half a minute)..."
     "$CC" -O2 -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION \
