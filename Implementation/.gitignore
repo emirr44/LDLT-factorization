@@ -2,9 +2,6 @@ build/
 *.o
 *.exe
 
-# local editor/agent settings, not part of the project
-.claude/
-
 # generated at first run; rebuilds itself from data/suitesparse
 data/catalog.db
 
