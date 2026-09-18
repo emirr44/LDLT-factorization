@@ -9,9 +9,9 @@ test matrices.
 
 ## Quick start
 
-**macOS / Linux**
-
 After navigating to project directory in your Terminal (cd path_to_project_src), enter following commands to start CLI tool
+
+**macOS / Linux**
 
 ```bash
 bash build.sh
