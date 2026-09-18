@@ -1,6 +1,6 @@
-# ldlt — sparse LDLᵀ factorization
+# Sparse LDLᵀ factorization
 
-C++17 implementation of the sparse LDL' factorization for symmetric positive
+C++ implementation of the sparse LDL' factorization for symmetric positive
 definite and indefinite matrices, following Timothy Davis, *Direct Methods for
 Sparse Linear Systems*, and the educational `LDL` package in SuiteSparse.
 
@@ -10,6 +10,8 @@ test matrices.
 ## Quick start
 
 **macOS / Linux**
+
+After navigating to project directory in your Terminal (cd path_to_project_src), enter following commands to start CLI tool
 
 ```bash
 bash build.sh
@@ -23,10 +25,10 @@ bash build.sh
 .\build\ldlt.exe
 ```
 
-The first build also compiles SQLite, which takes about half a minute; later
-builds reuse it. Nothing has to be installed: SQLite is bundled as source.
+Alternatively, open it with CMake app, select ldlt as Startup Project and compile directly. That will open an app.
 
-Alternatively, with CMake: `cmake -S . -B build && cmake --build build`.
+The first build also compiles SQLite, which takes about half a minute; later
+builds reuse it. Nothing has to be installed because SQLite is bundled as source.
 
 ## Using ldlt
 
