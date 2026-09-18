@@ -14,14 +14,14 @@ Download or clone repository, navigate to the Implementation file in Terminal wi
 **macOS / Linux**
 
 ```bash
-bash build.sh (or powershell -ExecutionPolicy Bypass -File .\build.ps1)
+bash build.sh
 ./build/ldlt
 ```
 
 **Windows**
 
 ```powershell
-.\build.ps1
+.\build.ps1  
 .\build\ldlt.exe
 ```
 
